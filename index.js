@@ -22,7 +22,7 @@
 
 var Service, Characteristic;
 var request = require("request");
-
+var pollingtoevent = require('polling-to-event');
 module.exports = function (homebridge) {
     Service = homebridge.hap.Service;
     Characteristic = homebridge.hap.Characteristic;
@@ -45,7 +45,7 @@ function Thermostat(log, config) {
     this.temperatureDisplayUnits = Characteristic.TemperatureDisplayUnits.CELSIUS;
     this.temperature = 19;
     this.relativeHumidity = 0.70;
-    this.switchHandling = config["switchHandling"] || "no";
+    this.switchHandling = config["switchHandling"] || "realtime";
     // The value property of CurrentHeatingCoolingState must be one of the following:
     //Characteristic.CurrentHeatingCoolingState.OFF = 0;
     //Characteristic.CurrentHeatingCoolingState.HEAT = 1;
@@ -79,11 +79,18 @@ function Thermostat(log, config) {
 
         statusemitter.on("statuspoll", function (data) {
             var json = JSON.parse(data);
-            that.state = binaryState > 0;
+            //that.state = binaryState > 0;
             that.log(that.service, "received power", that.apiroute, "state is currently", json);
             // switch used to easily add additonal services
-            that.targetState = json.targetStateCode;
-            that.service.setCharacteristic(Characteristic.TargetHeatingCoolingState, that.targetStateCode);
+            // {"targetState":"AUTO","targetStateCode":6,"currentHeatingCoolingState":0,"targetTemperature":10,"temperature":12,"humidity":98}
+            that.targetHeatingCoolingState = json.targetStateCode;
+            that.heatingCoolingState = json.currentHeatingCoolingState;
+            that.targetTemperature = json.targetTemperature;
+            that.temperature = json.temperature;
+            that.service.setCharacteristic(Characteristic.TargetHeatingCoolingState, that.targetHeatingCoolingState);
+            that.service.setCharacteristic(Characteristic.CurrentHeatingCoolingState, that.heatingCoolingState);
+            that.service.setCharacteristic(Characteristic.TargetTemperature, that.targetTemperature);
+            that.service.setCharacteristic(Characteristic.CurrentTemperature, that.temperature);
         });
     }
 }
@@ -312,23 +319,64 @@ Thermostat.prototype = {
 
 
         // Required Characteristics
+        var that = this;
         this.service
             .getCharacteristic(Characteristic.CurrentHeatingCoolingState)
             .on('get', this.getCurrentHeatingCoolingState.bind(this));
+        switch (this.switchHandling) {
+            //Power Polling
+            case "yes":
+                this.service
+                    .getCharacteristic(Characteristic.TargetHeatingCoolingState)
+                    .on('get', this.getTargetHeatingCoolingState.bind(this))
+                    .on('set', this.setTargetHeatingCoolingState.bind(this));
+                this.service
+                    .getCharacteristic(Characteristic.CurrentTemperature)
+                    .on('get', this.getCurrentTemperature.bind(this));
+                this.service
+                    .getCharacteristic(Characteristic.TargetTemperature)
+                    .on('get', this.getTargetTemperature.bind(this))
+                    .on('set', this.setTargetTemperature.bind(this));
+                break;
+            case "realtime":
+                this.service
+                    .getCharacteristic(Characteristic.TargetHeatingCoolingState)
+                    .on('get', function(callback) {callback(null, that.targetHeatingCoolingState)})
+                    .on('set', this.setTargetHeatingCoolingState.bind(this));
+                this.service
+                    .getCharacteristic(Characteristic.CurrentTemperature)
+                    .on('get', function(callback) {callback(null, that.temperature)});
+                this.service
+                    .getCharacteristic(Characteristic.TargetTemperature)
+                    .on('get', function(callback) {callback(null, that.targetTemperature)})
+                    .on('set', this.setTargetTemperature.bind(this));
+                break;
+            default	:
+                this.service
+                    .getCharacteristic(Characteristic.TargetHeatingCoolingState)
+                    .on('set', this.setTargetHeatingCoolingState.bind(this));
+                this.service
+                    .getCharacteristic(Characteristic.CurrentTemperature)
+                    .on('get', this.getCurrentTemperature.bind(this));
+                this.service
+                    .getCharacteristic(Characteristic.TargetTemperature)
+                    .on('get', this.getTargetTemperature.bind(this))
+                    .on('set', this.setTargetTemperature.bind(this));
+                break;}
 
-        this.service
-            .getCharacteristic(Characteristic.TargetHeatingCoolingState)
-            .on('get', this.getTargetHeatingCoolingState.bind(this))
-            .on('set', this.setTargetHeatingCoolingState.bind(this));
+        //this.service
+        //    .getCharacteristic(Characteristic.TargetHeatingCoolingState)
+        //    .on('get', this.getTargetHeatingCoolingState.bind(this))
+        //    .on('set', this.setTargetHeatingCoolingState.bind(this));
 
-        this.service
-            .getCharacteristic(Characteristic.CurrentTemperature)
-            .on('get', this.getCurrentTemperature.bind(this));
+        //this.service
+        //    .getCharacteristic(Characteristic.CurrentTemperature)
+        //    .on('get', this.getCurrentTemperature.bind(this));
 
-        this.service
-            .getCharacteristic(Characteristic.TargetTemperature)
-            .on('get', this.getTargetTemperature.bind(this))
-            .on('set', this.setTargetTemperature.bind(this));
+        //this.service
+        //    .getCharacteristic(Characteristic.TargetTemperature)
+        //    .on('get', this.getTargetTemperature.bind(this))
+        //    .on('set', this.setTargetTemperature.bind(this));
 
         this.service
             .getCharacteristic(Characteristic.TemperatureDisplayUnits)
